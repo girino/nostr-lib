@@ -21,6 +21,7 @@ import (
 
 	"github.com/fiatjaf/eventstore"
 	"github.com/fiatjaf/khatru"
+	jsonlib "github.com/girino/nostr-lib/json"
 	"github.com/girino/nostr-lib/logging"
 	"github.com/nbd-wtf/go-nostr"
 )
@@ -193,7 +194,45 @@ func getWorstHealthState(state1, state2, state3 string) string {
 	return HealthGreen
 }
 
-// Stats returns a snapshot of the RelayStore counters
+// GetStatsName returns the name of this stats provider
+func (r *RelayStore) GetStatsName() string {
+	return "relay"
+}
+
+// GetStats returns stats as JsonEntity
+func (r *RelayStore) GetStats() jsonlib.JsonEntity {
+	s := r.Stats()
+	obj := jsonlib.NewJsonObject()
+	obj.Set("publish_attempts", jsonlib.NewJsonValue(s.PublishAttempts))
+	obj.Set("publish_successes", jsonlib.NewJsonValue(s.PublishSuccesses))
+	obj.Set("publish_failures", jsonlib.NewJsonValue(s.PublishFailures))
+	obj.Set("consecutive_publish_failures", jsonlib.NewJsonValue(s.ConsecutivePublishFailures))
+	obj.Set("publish_health_state", jsonlib.NewJsonValue(s.PublishHealthState))
+	obj.Set("query_requests", jsonlib.NewJsonValue(s.QueryRequests))
+	obj.Set("query_internal_requests", jsonlib.NewJsonValue(s.QueryInternal))
+	obj.Set("query_external_requests", jsonlib.NewJsonValue(s.QueryExternal))
+	obj.Set("query_events_returned", jsonlib.NewJsonValue(s.QueryEventsReturned))
+	obj.Set("query_failures", jsonlib.NewJsonValue(s.QueryFailures))
+	obj.Set("consecutive_query_failures", jsonlib.NewJsonValue(s.ConsecutiveQueryFailures))
+	obj.Set("query_health_state", jsonlib.NewJsonValue(s.QueryHealthState))
+	obj.Set("count_requests", jsonlib.NewJsonValue(s.CountRequests))
+	obj.Set("count_internal_requests", jsonlib.NewJsonValue(s.CountInternal))
+	obj.Set("count_external_requests", jsonlib.NewJsonValue(s.CountExternal))
+	obj.Set("count_events_returned", jsonlib.NewJsonValue(s.CountEventsReturned))
+	obj.Set("count_failures", jsonlib.NewJsonValue(s.CountFailures))
+	obj.Set("main_health_state", jsonlib.NewJsonValue(s.MainHealthState))
+	obj.Set("health_status", jsonlib.NewJsonValue(s.HealthStatus))
+	obj.Set("is_healthy", jsonlib.NewJsonValue(s.IsHealthy))
+	obj.Set("average_publish_duration_ms", jsonlib.NewJsonValue(s.AveragePublishDurationMs))
+	obj.Set("average_query_duration_ms", jsonlib.NewJsonValue(s.AverageQueryDurationMs))
+	obj.Set("average_count_duration_ms", jsonlib.NewJsonValue(s.AverageCountDurationMs))
+	obj.Set("total_publish_duration_ms", jsonlib.NewJsonValue(s.TotalPublishDurationMs))
+	obj.Set("total_query_duration_ms", jsonlib.NewJsonValue(s.TotalQueryDurationMs))
+	obj.Set("total_count_duration_ms", jsonlib.NewJsonValue(s.TotalCountDurationMs))
+	return obj
+}
+
+// Stats returns a snapshot of the RelayStore counters (kept for backward compatibility)
 func (r *RelayStore) Stats() Stats {
 	consecutivePublishFailures := atomic.LoadInt64(&r.consecutivePublishFailures)
 	consecutiveQueryFailures := atomic.LoadInt64(&r.consecutiveQueryFailures)
