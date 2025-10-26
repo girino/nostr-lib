@@ -29,15 +29,6 @@ type StatsCollector interface {
 
 	// GetStatsAsJSON returns all stats as formatted JSON
 	GetStatsAsJSON() ([]byte, error)
-
-	// GetStatsAsJSONString returns all stats as a formatted JSON string
-	GetStatsAsJSONString() (string, error)
-
-	// GetProviderNames returns a list of all registered provider names
-	GetProviderNames() []string
-
-	// GetProviderCount returns the number of registered providers
-	GetProviderCount() int
 }
 
 // defaultStatsCollector is the default implementation of StatsCollector
@@ -91,34 +82,4 @@ func (sc *defaultStatsCollector) GetAllStats() *json.JsonObject {
 func (sc *defaultStatsCollector) GetStatsAsJSON() ([]byte, error) {
 	stats := sc.GetAllStats()
 	return json.MarshalIndent(stats, "", "  ")
-}
-
-// GetStatsAsJSONString returns all stats as a formatted JSON string
-func (sc *defaultStatsCollector) GetStatsAsJSONString() (string, error) {
-	data, err := sc.GetStatsAsJSON()
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
-// GetProviderNames returns a list of all registered provider names
-func (sc *defaultStatsCollector) GetProviderNames() []string {
-	sc.mu.RLock()
-	defer sc.mu.RUnlock()
-
-	names := make([]string, 0, len(sc.providers))
-	for name := range sc.providers {
-		names = append(names, name)
-	}
-
-	return names
-}
-
-// GetProviderCount returns the number of registered providers
-func (sc *defaultStatsCollector) GetProviderCount() int {
-	sc.mu.RLock()
-	defer sc.mu.RUnlock()
-
-	return len(sc.providers)
 }
