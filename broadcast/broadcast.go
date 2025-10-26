@@ -24,7 +24,7 @@ type BroadcastSystem struct {
 	discovery      *discovery.Discovery
 	broadcaster    *broadcaster.Broadcaster
 	healthChecker  *health.Checker
-	statsCollector *stats.StatsCollector
+	statsCollector stats.StatsCollector
 }
 
 // Config holds configuration for the broadcast system
@@ -54,7 +54,7 @@ func NewBroadcastSystem(cfg *Config) *BroadcastSystem {
 	bc := broadcaster.NewBroadcaster(mgr, mgr, cfg.MandatoryRelays, cfg.WorkerCount, cfg.CacheTTL)
 
 	// Create stats collector and register providers
-	statsCollector := stats.NewStatsCollector()
+	var statsCollector stats.StatsCollector = stats.NewStatsCollector()
 	statsCollector.RegisterProvider(mgr)
 	statsCollector.RegisterProvider(bc)
 
@@ -107,7 +107,7 @@ func (bs *BroadcastSystem) GetStats() json.JsonEntity {
 }
 
 // GetStatsCollector returns the stats collector for external use
-func (bs *BroadcastSystem) GetStatsCollector() *stats.StatsCollector {
+func (bs *BroadcastSystem) GetStatsCollector() stats.StatsCollector {
 	return bs.statsCollector
 }
 

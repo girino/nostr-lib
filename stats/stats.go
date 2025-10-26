@@ -15,21 +15,46 @@ type StatsProvider interface {
 	GetStats() json.JsonEntity
 }
 
-// StatsCollector manages multiple stats providers and aggregates their data
-type StatsCollector struct {
+// StatsCollector defines the interface for collecting statistics from providers
+type StatsCollector interface {
+	// RegisterProvider registers a stats provider with the collector
+	RegisterProvider(provider StatsProvider)
+
+	// UnregisterProvider removes a stats provider from the collector
+	UnregisterProvider(name string)
+
+	// GetAllStats collects statistics from all registered providers
+	// Returns a JsonObject with ordered keys
+	GetAllStats() *json.JsonObject
+
+	// GetStatsAsJSON returns all stats as formatted JSON
+	GetStatsAsJSON() ([]byte, error)
+
+	// GetStatsAsJSONString returns all stats as a formatted JSON string
+	GetStatsAsJSONString() (string, error)
+
+	// GetProviderNames returns a list of all registered provider names
+	GetProviderNames() []string
+
+	// GetProviderCount returns the number of registered providers
+	GetProviderCount() int
+}
+
+// defaultStatsCollector is the default implementation of StatsCollector
+type defaultStatsCollector struct {
 	providers map[string]StatsProvider
 	mu        sync.RWMutex
 }
 
 // NewStatsCollector creates a new stats collector
-func NewStatsCollector() *StatsCollector {
-	return &StatsCollector{
+func NewStatsCollector() StatsCollector {
+	return &defaultStatsCollector{
 		providers: make(map[string]StatsProvider),
 	}
 }
 
 // RegisterProvider registers a stats provider with the collector
-func (sc *StatsCollector) RegisterProvider(provider StatsProvider) {
+func (sc *defaultStatsCollector) RegisterProvider(provider StatsProvider) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 
@@ -38,7 +63,7 @@ func (sc *StatsCollector) RegisterProvider(provider StatsProvider) {
 }
 
 // UnregisterProvider removes a stats provider from the collector
-func (sc *StatsCollector) UnregisterProvider(name string) {
+func (sc *defaultStatsCollector) UnregisterProvider(name string) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 
@@ -47,7 +72,7 @@ func (sc *StatsCollector) UnregisterProvider(name string) {
 
 // GetAllStats collects statistics from all registered providers
 // Returns a JsonObject with ordered keys
-func (sc *StatsCollector) GetAllStats() *json.JsonObject {
+func (sc *defaultStatsCollector) GetAllStats() *json.JsonObject {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 
@@ -63,13 +88,13 @@ func (sc *StatsCollector) GetAllStats() *json.JsonObject {
 }
 
 // GetStatsAsJSON returns all stats as formatted JSON
-func (sc *StatsCollector) GetStatsAsJSON() ([]byte, error) {
+func (sc *defaultStatsCollector) GetStatsAsJSON() ([]byte, error) {
 	stats := sc.GetAllStats()
 	return json.MarshalIndent(stats, "", "  ")
 }
 
 // GetStatsAsJSONString returns all stats as a formatted JSON string
-func (sc *StatsCollector) GetStatsAsJSONString() (string, error) {
+func (sc *defaultStatsCollector) GetStatsAsJSONString() (string, error) {
 	data, err := sc.GetStatsAsJSON()
 	if err != nil {
 		return "", err
@@ -78,7 +103,7 @@ func (sc *StatsCollector) GetStatsAsJSONString() (string, error) {
 }
 
 // GetProviderNames returns a list of all registered provider names
-func (sc *StatsCollector) GetProviderNames() []string {
+func (sc *defaultStatsCollector) GetProviderNames() []string {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 
@@ -91,7 +116,7 @@ func (sc *StatsCollector) GetProviderNames() []string {
 }
 
 // GetProviderCount returns the number of registered providers
-func (sc *StatsCollector) GetProviderCount() int {
+func (sc *defaultStatsCollector) GetProviderCount() int {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 
