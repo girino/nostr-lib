@@ -11,8 +11,8 @@ var (
 	collectorOnce   sync.Once
 )
 
-// Global returns the global stats collector singleton
-func Global() StatsCollector {
+// GetCollector returns the global stats collector singleton
+func GetCollector() StatsCollector {
 	collectorOnce.Do(func() {
 		globalCollector = NewStatsCollector()
 	})

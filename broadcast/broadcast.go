@@ -53,7 +53,7 @@ func NewBroadcastSystem(cfg *Config) *BroadcastSystem {
 	bc := broadcaster.NewBroadcaster(mgr, mgr, cfg.MandatoryRelays, cfg.WorkerCount, cfg.CacheTTL)
 
 	// Register providers with global stats collector
-	statsCollector := stats.Global()
+	statsCollector := stats.GetCollector()
 	statsCollector.RegisterProvider(mgr)
 	statsCollector.RegisterProvider(bc)
 
