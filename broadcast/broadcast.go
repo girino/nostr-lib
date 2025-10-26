@@ -8,17 +8,15 @@ import (
 	"github.com/girino/nostr-lib/broadcast/discovery"
 	"github.com/girino/nostr-lib/broadcast/health"
 	"github.com/girino/nostr-lib/broadcast/manager"
+	"github.com/girino/nostr-lib/json"
 	"github.com/girino/nostr-lib/logging"
 	"github.com/girino/nostr-lib/stats"
 	"github.com/nbd-wtf/go-nostr"
 )
 
 // BroadcastStats represents the complete statistics from the broadcast system
-type BroadcastStats struct {
-	Broadcaster broadcaster.BroadcasterStats `json:"broadcaster"`
-	Manager     manager.ManagerStats         `json:"manager"`
-	Timestamp   int64                        `json:"timestamp"`
-}
+// Using JsonEntity for ordered JSON output
+type BroadcastStats json.JsonEntity
 
 // BroadcastSystem provides a unified interface for relay broadcasting
 type BroadcastSystem struct {
@@ -96,17 +94,16 @@ func (bs *BroadcastSystem) BroadcastEvent(event *nostr.Event) {
 	bs.broadcaster.Broadcast(event)
 }
 
-// GetStats returns comprehensive statistics in structured format
-func (bs *BroadcastSystem) GetStats() BroadcastStats {
+// GetStats returns comprehensive statistics as a JsonEntity
+func (bs *BroadcastSystem) GetStats() json.JsonEntity {
+	obj := json.NewJsonObject()
+	
 	// Get stats from each provider
-	broadcasterStats := bs.broadcaster.GetBroadcasterStats()
-	managerStats := bs.manager.GetStats().(manager.ManagerStats)
-
-	return BroadcastStats{
-		Broadcaster: broadcasterStats,
-		Manager:     managerStats,
-		Timestamp:   time.Now().Unix(),
-	}
+	obj.Set("broadcaster", bs.broadcaster.GetStats())
+	obj.Set("manager", bs.manager.GetStats())
+	obj.Set("timestamp", json.NewJsonValue(time.Now().Unix()))
+	
+	return obj
 }
 
 // GetStatsCollector returns the stats collector for external use

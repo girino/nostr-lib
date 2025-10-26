@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/girino/nostr-lib/json"
 	"github.com/girino/nostr-lib/logging"
 	"github.com/nbd-wtf/go-nostr"
 )
@@ -429,13 +430,10 @@ func (b *Broadcaster) GetStatsName() string {
 	return "broadcaster"
 }
 
-// GetStats returns broadcaster-specific statistics in structured format
-func (b *Broadcaster) GetStats() interface{} {
-	return b.GetBroadcasterStats()
-}
+// GetStats returns broadcaster-specific statistics as a JsonEntity
+func (b *Broadcaster) GetStats() json.JsonEntity {
+	obj := json.NewJsonObject()
 
-// GetBroadcasterStats returns broadcaster-specific statistics in structured format
-func (b *Broadcaster) GetBroadcasterStats() BroadcasterStats {
 	// Get queue stats
 	b.overflowMutex.Lock()
 	overflowSize := len(b.overflowQueue)
@@ -461,27 +459,32 @@ func (b *Broadcaster) GetBroadcasterStats() BroadcasterStats {
 	}
 	cacheUtilization := float64(cacheSize) / float64(b.cacheMaxSize) * 100.0
 
-	return BroadcasterStats{
-		MandatoryRelays: len(b.mandatoryRelays),
-		Queue: QueueStats{
-			WorkerCount:        b.workerCount,
-			ChannelSize:        channelSize,
-			ChannelCapacity:    b.channelCapacity,
-			ChannelUtilization: channelUtilization,
-			OverflowSize:       overflowSize,
-			TotalQueued:        totalQueued,
-			PeakSize:           peakSize,
-			SaturationCount:    saturationCount,
-			IsSaturated:        isSaturated,
-			LastSaturation:     b.lastSaturation.Format(time.RFC3339),
-		},
-		Cache: CacheStats{
-			Size:           cacheSize,
-			MaxSize:        b.cacheMaxSize,
-			UtilizationPct: cacheUtilization,
-			Hits:           cacheHits,
-			Misses:         cacheMisses,
-			HitRatePct:     cacheHitRate,
-		},
-	}
+	// Add mandatory relays
+	obj.Set("mandatory_relays", json.NewJsonValue(len(b.mandatoryRelays)))
+
+	// Add queue stats
+	queueObj := json.NewJsonObject()
+	queueObj.Set("worker_count", json.NewJsonValue(b.workerCount))
+	queueObj.Set("channel_size", json.NewJsonValue(channelSize))
+	queueObj.Set("channel_capacity", json.NewJsonValue(b.channelCapacity))
+	queueObj.Set("channel_utilization", json.NewJsonValue(channelUtilization))
+	queueObj.Set("overflow_size", json.NewJsonValue(overflowSize))
+	queueObj.Set("total_queued", json.NewJsonValue(totalQueued))
+	queueObj.Set("peak_size", json.NewJsonValue(peakSize))
+	queueObj.Set("saturation_count", json.NewJsonValue(saturationCount))
+	queueObj.Set("is_saturated", json.NewJsonValue(isSaturated))
+	queueObj.Set("last_saturation", json.NewJsonValue(b.lastSaturation.Format(time.RFC3339)))
+	obj.Set("queue", queueObj)
+
+	// Add cache stats
+	cacheObj := json.NewJsonObject()
+	cacheObj.Set("size", json.NewJsonValue(cacheSize))
+	cacheObj.Set("max_size", json.NewJsonValue(b.cacheMaxSize))
+	cacheObj.Set("utilization_pct", json.NewJsonValue(cacheUtilization))
+	cacheObj.Set("hits", json.NewJsonValue(cacheHits))
+	cacheObj.Set("misses", json.NewJsonValue(cacheMisses))
+	cacheObj.Set("hit_rate_pct", json.NewJsonValue(cacheHitRate))
+	obj.Set("cache", cacheObj)
+
+	return obj
 }

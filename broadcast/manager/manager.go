@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/girino/nostr-lib/json"
 	"github.com/girino/nostr-lib/logging"
 )
 
@@ -328,50 +329,54 @@ func (m *Manager) GetStatsName() string {
 	return "manager"
 }
 
-// GetStats returns manager-specific statistics in structured format
-func (m *Manager) GetStats() interface{} {
+// GetStats returns manager-specific statistics as a JsonEntity
+func (m *Manager) GetStats() json.JsonEntity {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
+	obj := json.NewJsonObject()
+
+	// Add basic stats
+	obj.Set("total_relays", json.NewJsonValue(len(m.relays)))
+	obj.Set("top_n", json.NewJsonValue(m.topN))
+	obj.Set("decay", json.NewJsonValue(m.decay))
+	obj.Set("initialized", json.NewJsonValue(m.initialized))
 
 	topRelays := m.GetTopRelays()
 	mandatoryRelays := m.GetMandatoryRelays()
 
-	// Convert top relays to structured format
-	topRelayList := make([]RelayStats, len(topRelays))
-	for i, relay := range topRelays {
+	// Convert top relays to JsonList
+	topRelayList := json.NewJsonList()
+	for _, relay := range topRelays {
+		relayObj := json.NewJsonObject()
 		score := m.CalculateScore(relay)
-		topRelayList[i] = RelayStats{
-			URL:           relay.URL,
-			Score:         score,
-			SuccessRate:   relay.SuccessRate,
-			AvgResponseMs: relay.AvgResponseTime.Milliseconds(),
-			TotalAttempts: relay.TotalAttempts,
-			IsMandatory:   relay.IsMandatory,
-			LastChecked:   relay.LastChecked.Format(time.RFC3339),
-		}
+		relayObj.Set("url", json.NewJsonValue(relay.URL))
+		relayObj.Set("score", json.NewJsonValue(score))
+		relayObj.Set("success_rate", json.NewJsonValue(relay.SuccessRate))
+		relayObj.Set("avg_response_ms", json.NewJsonValue(relay.AvgResponseTime.Milliseconds()))
+		relayObj.Set("total_attempts", json.NewJsonValue(relay.TotalAttempts))
+		relayObj.Set("is_mandatory", json.NewJsonValue(relay.IsMandatory))
+		relayObj.Set("last_checked", json.NewJsonValue(relay.LastChecked.Format(time.RFC3339)))
+		topRelayList.Append(relayObj)
 	}
 
-	// Convert mandatory relays to structured format
-	mandatoryRelayList := make([]RelayStats, len(mandatoryRelays))
-	for i, relay := range mandatoryRelays {
+	// Convert mandatory relays to JsonList
+	mandatoryRelayList := json.NewJsonList()
+	for _, relay := range mandatoryRelays {
+		relayObj := json.NewJsonObject()
 		score := m.CalculateScore(relay)
-		mandatoryRelayList[i] = RelayStats{
-			URL:           relay.URL,
-			Score:         score,
-			SuccessRate:   relay.SuccessRate,
-			AvgResponseMs: relay.AvgResponseTime.Milliseconds(),
-			TotalAttempts: relay.TotalAttempts,
-			IsMandatory:   relay.IsMandatory,
-			LastChecked:   relay.LastChecked.Format(time.RFC3339),
-		}
+		relayObj.Set("url", json.NewJsonValue(relay.URL))
+		relayObj.Set("score", json.NewJsonValue(score))
+		relayObj.Set("success_rate", json.NewJsonValue(relay.SuccessRate))
+		relayObj.Set("avg_response_ms", json.NewJsonValue(relay.AvgResponseTime.Milliseconds()))
+		relayObj.Set("total_attempts", json.NewJsonValue(relay.TotalAttempts))
+		relayObj.Set("is_mandatory", json.NewJsonValue(relay.IsMandatory))
+		relayObj.Set("last_checked", json.NewJsonValue(relay.LastChecked.Format(time.RFC3339)))
+		mandatoryRelayList.Append(relayObj)
 	}
 
-	return ManagerStats{
-		MandatoryRelayList: mandatoryRelayList,
-		TopRelays:          topRelayList,
-		TotalRelays:        len(m.relays),
-		TopN:               m.topN,
-		Decay:              m.decay,
-		Initialized:        m.initialized,
-	}
+	obj.Set("top_relays", topRelayList)
+	obj.Set("mandatory_relays", mandatoryRelayList)
+
+	return obj
 }
