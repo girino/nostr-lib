@@ -6,6 +6,19 @@ import (
 	"github.com/girino/nostr-lib/json"
 )
 
+var (
+	globalCollector StatsCollector
+	collectorOnce   sync.Once
+)
+
+// Global returns the global stats collector singleton
+func Global() StatsCollector {
+	collectorOnce.Do(func() {
+		globalCollector = NewStatsCollector()
+	})
+	return globalCollector
+}
+
 // StatsProvider defines the interface for modules that provide statistics
 type StatsProvider interface {
 	// GetStatsName returns a unique name for this stats provider

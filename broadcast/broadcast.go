@@ -20,11 +20,10 @@ type BroadcastStats json.JsonEntity
 
 // BroadcastSystem provides a unified interface for relay broadcasting
 type BroadcastSystem struct {
-	manager        *manager.Manager
-	discovery      *discovery.Discovery
-	broadcaster    *broadcaster.Broadcaster
-	healthChecker  *health.Checker
-	statsCollector stats.StatsCollector
+	manager       *manager.Manager
+	discovery     *discovery.Discovery
+	broadcaster   *broadcaster.Broadcaster
+	healthChecker *health.Checker
 }
 
 // Config holds configuration for the broadcast system
@@ -53,17 +52,16 @@ func NewBroadcastSystem(cfg *Config) *BroadcastSystem {
 	// Create broadcaster with manager as relay provider and result tracker
 	bc := broadcaster.NewBroadcaster(mgr, mgr, cfg.MandatoryRelays, cfg.WorkerCount, cfg.CacheTTL)
 
-	// Create stats collector and register providers
-	var statsCollector stats.StatsCollector = stats.NewStatsCollector()
+	// Register providers with global stats collector
+	statsCollector := stats.Global()
 	statsCollector.RegisterProvider(mgr)
 	statsCollector.RegisterProvider(bc)
 
 	return &BroadcastSystem{
-		manager:        mgr,
-		discovery:      disc,
-		broadcaster:    bc,
-		healthChecker:  healthChecker,
-		statsCollector: statsCollector,
+		manager:       mgr,
+		discovery:     disc,
+		broadcaster:   bc,
+		healthChecker: healthChecker,
 	}
 }
 
@@ -106,14 +104,9 @@ func (bs *BroadcastSystem) GetStats() json.JsonEntity {
 	return obj
 }
 
-// GetStatsCollector returns the stats collector for external use
-func (bs *BroadcastSystem) GetStatsCollector() stats.StatsCollector {
-	return bs.statsCollector
-}
-
 // GetStatsAsJSON returns all stats as formatted JSON
 func (bs *BroadcastSystem) GetStatsAsJSON() ([]byte, error) {
-	return bs.statsCollector.GetStatsAsJSON()
+	return stats.Global().GetStatsAsJSON()
 }
 
 // AddMandatoryRelays adds mandatory relays to the system
