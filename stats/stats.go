@@ -3,7 +3,7 @@ package stats
 import (
 	"sync"
 
-	jsonlib "github.com/girino/nostr-lib/json"
+	"github.com/girino/nostr-lib/json"
 )
 
 // StatsProvider defines the interface for modules that provide statistics
@@ -12,7 +12,7 @@ type StatsProvider interface {
 	GetStatsName() string
 
 	// GetStats returns the statistics data as a JsonEntity
-	GetStats() jsonlib.JsonEntity
+	GetStats() json.JsonEntity
 }
 
 // StatsCollector manages multiple stats providers and aggregates their data
@@ -47,11 +47,11 @@ func (sc *StatsCollector) UnregisterProvider(name string) {
 
 // GetAllStats collects statistics from all registered providers
 // Returns a JsonObject with ordered keys
-func (sc *StatsCollector) GetAllStats() *jsonlib.JsonObject {
+func (sc *StatsCollector) GetAllStats() *json.JsonObject {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 
-	obj := jsonlib.NewJsonObject()
+	obj := json.NewJsonObject()
 
 	// Add stats in registration order
 	for name, provider := range sc.providers {
@@ -65,7 +65,7 @@ func (sc *StatsCollector) GetAllStats() *jsonlib.JsonObject {
 // GetStatsAsJSON returns all stats as formatted JSON
 func (sc *StatsCollector) GetStatsAsJSON() ([]byte, error) {
 	stats := sc.GetAllStats()
-	return jsonlib.MarshalIndent(stats, "", "  ")
+	return json.MarshalIndent(stats, "", "  ")
 }
 
 // GetStatsAsJSONString returns all stats as a formatted JSON string
