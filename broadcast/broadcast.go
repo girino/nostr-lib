@@ -97,12 +97,12 @@ func (bs *BroadcastSystem) BroadcastEvent(event *nostr.Event) {
 // GetStats returns comprehensive statistics as a JsonEntity
 func (bs *BroadcastSystem) GetStats() json.JsonEntity {
 	obj := json.NewJsonObject()
-	
+
 	// Get stats from each provider
 	obj.Set("broadcaster", bs.broadcaster.GetStats())
 	obj.Set("manager", bs.manager.GetStats())
 	obj.Set("timestamp", json.NewJsonValue(time.Now().Unix()))
-	
+
 	return obj
 }
 

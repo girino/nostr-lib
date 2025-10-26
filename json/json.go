@@ -157,3 +157,19 @@ func AsJsonEntity(v interface{}) (JsonEntity, error) {
 func Marshal(v JsonEntity) ([]byte, error) {
 	return v.MarshalJSON()
 }
+
+// MarshalIndent marshals a JsonEntity with indentation
+func MarshalIndent(v JsonEntity, prefix, indent string) ([]byte, error) {
+	data, err := v.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse the JSON to add indentation
+	var parsed interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return nil, err
+	}
+
+	return json.MarshalIndent(parsed, prefix, indent)
+}

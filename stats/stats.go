@@ -1,7 +1,6 @@
 package stats
 
 import (
-	"encoding/json"
 	"sync"
 
 	jsonlib "github.com/girino/nostr-lib/json"
@@ -66,7 +65,7 @@ func (sc *StatsCollector) GetAllStats() *jsonlib.JsonObject {
 // GetStatsAsJSON returns all stats as formatted JSON
 func (sc *StatsCollector) GetStatsAsJSON() ([]byte, error) {
 	stats := sc.GetAllStats()
-	return json.MarshalIndent(stats, "", "  ")
+	return jsonlib.MarshalIndent(stats, "", "  ")
 }
 
 // GetStatsAsJSONString returns all stats as a formatted JSON string
