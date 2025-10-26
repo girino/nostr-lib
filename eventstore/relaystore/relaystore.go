@@ -201,55 +201,10 @@ func (r *RelayStore) GetStatsName() string {
 
 // GetStats returns stats as JsonEntity
 func (r *RelayStore) GetStats() jsonlib.JsonEntity {
-	s := r.Stats()
-	obj := jsonlib.NewJsonObject()
-	obj.Set("publish_attempts", jsonlib.NewJsonValue(s.PublishAttempts))
-	obj.Set("publish_successes", jsonlib.NewJsonValue(s.PublishSuccesses))
-	obj.Set("publish_failures", jsonlib.NewJsonValue(s.PublishFailures))
-	obj.Set("consecutive_publish_failures", jsonlib.NewJsonValue(s.ConsecutivePublishFailures))
-	obj.Set("publish_health_state", jsonlib.NewJsonValue(s.PublishHealthState))
-	obj.Set("query_requests", jsonlib.NewJsonValue(s.QueryRequests))
-	obj.Set("query_internal_requests", jsonlib.NewJsonValue(s.QueryInternal))
-	obj.Set("query_external_requests", jsonlib.NewJsonValue(s.QueryExternal))
-	obj.Set("query_events_returned", jsonlib.NewJsonValue(s.QueryEventsReturned))
-	obj.Set("query_failures", jsonlib.NewJsonValue(s.QueryFailures))
-	obj.Set("consecutive_query_failures", jsonlib.NewJsonValue(s.ConsecutiveQueryFailures))
-	obj.Set("query_health_state", jsonlib.NewJsonValue(s.QueryHealthState))
-	obj.Set("count_requests", jsonlib.NewJsonValue(s.CountRequests))
-	obj.Set("count_internal_requests", jsonlib.NewJsonValue(s.CountInternal))
-	obj.Set("count_external_requests", jsonlib.NewJsonValue(s.CountExternal))
-	obj.Set("count_events_returned", jsonlib.NewJsonValue(s.CountEventsReturned))
-	obj.Set("count_failures", jsonlib.NewJsonValue(s.CountFailures))
-	obj.Set("main_health_state", jsonlib.NewJsonValue(s.MainHealthState))
-	obj.Set("health_status", jsonlib.NewJsonValue(s.HealthStatus))
-	obj.Set("is_healthy", jsonlib.NewJsonValue(s.IsHealthy))
-	obj.Set("average_publish_duration_ms", jsonlib.NewJsonValue(s.AveragePublishDurationMs))
-	obj.Set("average_query_duration_ms", jsonlib.NewJsonValue(s.AverageQueryDurationMs))
-	obj.Set("average_count_duration_ms", jsonlib.NewJsonValue(s.AverageCountDurationMs))
-	obj.Set("total_publish_duration_ms", jsonlib.NewJsonValue(s.TotalPublishDurationMs))
-	obj.Set("total_query_duration_ms", jsonlib.NewJsonValue(s.TotalQueryDurationMs))
-	obj.Set("total_count_duration_ms", jsonlib.NewJsonValue(s.TotalCountDurationMs))
-	return obj
-}
-
-// Stats returns a snapshot of the RelayStore counters (kept for backward compatibility)
-func (r *RelayStore) Stats() Stats {
+	// Load all counters
 	consecutivePublishFailures := atomic.LoadInt64(&r.consecutivePublishFailures)
 	consecutiveQueryFailures := atomic.LoadInt64(&r.consecutiveQueryFailures)
 	maxFailures := atomic.LoadInt64(&r.maxConsecutiveFailures)
-
-	isHealthy := consecutivePublishFailures < maxFailures && consecutiveQueryFailures < maxFailures
-	healthStatus := "healthy"
-	if !isHealthy {
-		healthStatus = "unhealthy"
-	}
-
-	// Determine individual health states
-	publishHealthState := getHealthState(consecutivePublishFailures)
-	queryHealthState := getHealthState(consecutiveQueryFailures)
-	mainHealthState := getWorstHealthState(publishHealthState, queryHealthState, HealthGreen)
-
-	// Calculate timing statistics
 	totalPublishDurationNs := atomic.LoadInt64(&r.totalPublishDurationNs)
 	totalQueryDurationNs := atomic.LoadInt64(&r.totalQueryDurationNs)
 	totalCountDurationNs := atomic.LoadInt64(&r.totalCountDurationNs)
@@ -257,49 +212,61 @@ func (r *RelayStore) Stats() Stats {
 	queryCount := atomic.LoadInt64(&r.queryCount)
 	countCount := atomic.LoadInt64(&r.countCount)
 
+	// Calculate health states
+	isHealthy := consecutivePublishFailures < maxFailures && consecutiveQueryFailures < maxFailures
+	healthStatus := "healthy"
+	if !isHealthy {
+		healthStatus = "unhealthy"
+	}
+
+	publishHealthState := getHealthState(consecutivePublishFailures)
+	queryHealthState := getHealthState(consecutiveQueryFailures)
+	mainHealthState := getWorstHealthState(publishHealthState, queryHealthState, HealthGreen)
+
+	// Calculate timing statistics
 	var averagePublishDurationMs float64
 	var averageQueryDurationMs float64
 	var averageCountDurationMs float64
 
 	if publishCount > 0 {
-		averagePublishDurationMs = float64(totalPublishDurationNs) / float64(publishCount) / 1e6 // Convert ns to ms
+		averagePublishDurationMs = float64(totalPublishDurationNs) / float64(publishCount) / 1e6
 	}
 	if queryCount > 0 {
-		averageQueryDurationMs = float64(totalQueryDurationNs) / float64(queryCount) / 1e6 // Convert ns to ms
+		averageQueryDurationMs = float64(totalQueryDurationNs) / float64(queryCount) / 1e6
 	}
 	if countCount > 0 {
-		averageCountDurationMs = float64(totalCountDurationNs) / float64(countCount) / 1e6 // Convert ns to ms
+		averageCountDurationMs = float64(totalCountDurationNs) / float64(countCount) / 1e6
 	}
 
-	return Stats{
-		PublishAttempts:            atomic.LoadInt64(&r.publishAttempts),
-		PublishSuccesses:           atomic.LoadInt64(&r.publishSuccesses),
-		PublishFailures:            atomic.LoadInt64(&r.publishFailures),
-		QueryRequests:              atomic.LoadInt64(&r.queryRequests),
-		QueryInternal:              atomic.LoadInt64(&r.queryInternal),
-		QueryExternal:              atomic.LoadInt64(&r.queryExternal),
-		QueryEventsReturned:        atomic.LoadInt64(&r.queryEventsReturned),
-		QueryFailures:              atomic.LoadInt64(&r.queryFailures),
-		CountRequests:              atomic.LoadInt64(&r.countRequests),
-		CountInternal:              atomic.LoadInt64(&r.countInternal),
-		CountExternal:              atomic.LoadInt64(&r.countExternal),
-		CountEventsReturned:        atomic.LoadInt64(&r.countEventsReturned),
-		CountFailures:              atomic.LoadInt64(&r.countFailures),
-		ConsecutivePublishFailures: consecutivePublishFailures,
-		ConsecutiveQueryFailures:   consecutiveQueryFailures,
-		IsHealthy:                  isHealthy,
-		HealthStatus:               healthStatus,
-		PublishHealthState:         publishHealthState,
-		QueryHealthState:           queryHealthState,
-		MainHealthState:            mainHealthState,
-		// Timing statistics
-		AveragePublishDurationMs: averagePublishDurationMs,
-		AverageQueryDurationMs:   averageQueryDurationMs,
-		AverageCountDurationMs:   averageCountDurationMs,
-		TotalPublishDurationMs:   totalPublishDurationNs / 1e6, // Convert ns to ms
-		TotalQueryDurationMs:     totalQueryDurationNs / 1e6,   // Convert ns to ms
-		TotalCountDurationMs:     totalCountDurationNs / 1e6,   // Convert ns to ms
-	}
+	// Build JsonObject directly
+	obj := jsonlib.NewJsonObject()
+	obj.Set("publish_attempts", jsonlib.NewJsonValue(atomic.LoadInt64(&r.publishAttempts)))
+	obj.Set("publish_successes", jsonlib.NewJsonValue(atomic.LoadInt64(&r.publishSuccesses)))
+	obj.Set("publish_failures", jsonlib.NewJsonValue(atomic.LoadInt64(&r.publishFailures)))
+	obj.Set("consecutive_publish_failures", jsonlib.NewJsonValue(consecutivePublishFailures))
+	obj.Set("publish_health_state", jsonlib.NewJsonValue(publishHealthState))
+	obj.Set("query_requests", jsonlib.NewJsonValue(atomic.LoadInt64(&r.queryRequests)))
+	obj.Set("query_internal_requests", jsonlib.NewJsonValue(atomic.LoadInt64(&r.queryInternal)))
+	obj.Set("query_external_requests", jsonlib.NewJsonValue(atomic.LoadInt64(&r.queryExternal)))
+	obj.Set("query_events_returned", jsonlib.NewJsonValue(atomic.LoadInt64(&r.queryEventsReturned)))
+	obj.Set("query_failures", jsonlib.NewJsonValue(atomic.LoadInt64(&r.queryFailures)))
+	obj.Set("consecutive_query_failures", jsonlib.NewJsonValue(consecutiveQueryFailures))
+	obj.Set("query_health_state", jsonlib.NewJsonValue(queryHealthState))
+	obj.Set("count_requests", jsonlib.NewJsonValue(atomic.LoadInt64(&r.countRequests)))
+	obj.Set("count_internal_requests", jsonlib.NewJsonValue(atomic.LoadInt64(&r.countInternal)))
+	obj.Set("count_external_requests", jsonlib.NewJsonValue(atomic.LoadInt64(&r.countExternal)))
+	obj.Set("count_events_returned", jsonlib.NewJsonValue(atomic.LoadInt64(&r.countEventsReturned)))
+	obj.Set("count_failures", jsonlib.NewJsonValue(atomic.LoadInt64(&r.countFailures)))
+	obj.Set("main_health_state", jsonlib.NewJsonValue(mainHealthState))
+	obj.Set("health_status", jsonlib.NewJsonValue(healthStatus))
+	obj.Set("is_healthy", jsonlib.NewJsonValue(isHealthy))
+	obj.Set("average_publish_duration_ms", jsonlib.NewJsonValue(averagePublishDurationMs))
+	obj.Set("average_query_duration_ms", jsonlib.NewJsonValue(averageQueryDurationMs))
+	obj.Set("average_count_duration_ms", jsonlib.NewJsonValue(averageCountDurationMs))
+	obj.Set("total_publish_duration_ms", jsonlib.NewJsonValue(totalPublishDurationNs/1e6))
+	obj.Set("total_query_duration_ms", jsonlib.NewJsonValue(totalQueryDurationNs/1e6))
+	obj.Set("total_count_duration_ms", jsonlib.NewJsonValue(totalCountDurationNs/1e6))
+	return obj
 }
 
 // New creates a RelayStore with mandatory query relays, optional publish relays, and optional relay authentication key.
