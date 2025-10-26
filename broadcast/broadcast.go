@@ -104,11 +104,6 @@ func (bs *BroadcastSystem) GetStats() json.JsonEntity {
 	return obj
 }
 
-// GetStatsAsJSON returns all stats as formatted JSON
-func (bs *BroadcastSystem) GetStatsAsJSON() ([]byte, error) {
-	return stats.Global().GetStatsAsJSON()
-}
-
 // AddMandatoryRelays adds mandatory relays to the system
 func (bs *BroadcastSystem) AddMandatoryRelays(urls []string) {
 	for _, url := range urls {
