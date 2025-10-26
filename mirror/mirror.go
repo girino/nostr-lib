@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/fiatjaf/khatru"
+	jsonlib "github.com/girino/nostr-lib/json"
 	"github.com/girino/nostr-lib/logging"
 	"github.com/nbd-wtf/go-nostr"
 )
@@ -86,7 +87,27 @@ func (m *MirrorManager) Close() {
 	}
 }
 
-// Stats returns a snapshot of the MirrorManager counters
+// GetStatsName returns the name of this stats provider
+func (m *MirrorManager) GetStatsName() string {
+	return "mirror"
+}
+
+// GetStats returns stats as JsonEntity
+func (m *MirrorManager) GetStats() jsonlib.JsonEntity {
+	s := m.Stats()
+	obj := jsonlib.NewJsonObject()
+	obj.Set("mirrored_events", jsonlib.NewJsonValue(s.MirroredEvents))
+	obj.Set("mirror_attempts", jsonlib.NewJsonValue(s.MirrorAttempts))
+	obj.Set("mirror_successes", jsonlib.NewJsonValue(s.MirrorSuccesses))
+	obj.Set("mirror_failures", jsonlib.NewJsonValue(s.MirrorFailures))
+	obj.Set("consecutive_mirror_failures", jsonlib.NewJsonValue(s.ConsecutiveMirrorFailures))
+	obj.Set("mirror_health_state", jsonlib.NewJsonValue(s.MirrorHealthState))
+	obj.Set("live_relays", jsonlib.NewJsonValue(s.LiveRelays))
+	obj.Set("dead_relays", jsonlib.NewJsonValue(s.DeadRelays))
+	return obj
+}
+
+// Stats returns a snapshot of the MirrorManager counters (kept for backward compatibility)
 func (m *MirrorManager) Stats() MirrorStats {
 	consecutiveMirrorFailures := atomic.LoadInt64(&m.consecutiveMirrorFailures)
 	mirrorHealthState := m.getHealthState(consecutiveMirrorFailures)
