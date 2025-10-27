@@ -208,6 +208,9 @@ func (m *MirrorManager) mirrorFromRelays(ctx context.Context, relay *khatru.Rela
 				return
 			}
 
+			// Increment attempt counter for every event received
+			atomic.AddInt64(&m.mirrorAttempts, 1)
+
 			if relayEvent.Event != nil {
 				// broadcast the event to all connected clients
 				clientCount := relay.BroadcastEvent(relayEvent.Event)
