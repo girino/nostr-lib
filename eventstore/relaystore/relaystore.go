@@ -10,7 +10,6 @@ package relaystore
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	neturl "net/url"
@@ -550,123 +549,6 @@ func (r *RelayStore) SaveEvent(ctx context.Context, evt *nostr.Event) error {
 	// RelayStore is query-only, no-op for SaveEvent
 	logging.DebugMethod("relaystore", "SaveEvent", "RelayStore is query-only, ignoring save for event %s", evt.ID)
 	return nil
-}
-
-// saveEventToRemotes forwards the event to all configured remotes. It returns nil if at least one remote accepted the event.
-// This is the original implementation kept for reference but no longer used.
-func (r *RelayStore) saveEventToRemotes(ctx context.Context, evt *nostr.Event) error {
-	// Start timing measurement
-	startTime := time.Now()
-	defer func() {
-		duration := time.Since(startTime)
-		atomic.AddInt64(&r.totalPublishDurationNs, duration.Nanoseconds())
-		atomic.AddInt64(&r.publishCount, 1)
-	}()
-
-	// publish to all remotes concurrently and collect errors
-	var wg sync.WaitGroup
-	errsMu := sync.Mutex{}
-	var errs []error
-	var prefixedErrs []PrefixedError
-
-	// if no remotes configured, simply return nil (nothing to do)
-	if len(r.urls) == 0 {
-		logging.DebugMethod("relaystore", "SaveEvent", "no remotes configured, not forwarding event %s", evt.ID)
-		return nil
-	}
-
-	for _, url := range r.urls {
-		url := strings.TrimSpace(url)
-		if url == "" {
-			continue
-		}
-		wg.Add(1)
-		go func(u string) {
-			defer wg.Done()
-			// create a child context with timeout for each publish
-			cctx, cancel := context.WithTimeout(ctx, r.publishTimeout)
-			defer cancel()
-
-			logging.DebugMethod("relaystore", "SaveEvent", "publishing event %s to %s", evt.ID, u)
-
-			// count attempt
-			atomic.AddInt64(&r.publishAttempts, 1)
-
-			rl, err := r.ensureRelay(cctx, u)
-			if err != nil {
-				errsMu.Lock()
-				errs = append(errs, fmt.Errorf("%s: %w", u, err))
-				errsMu.Unlock()
-				logging.DebugMethod("relaystore", "SaveEvent", "publish to %s failed to get relay: %v", u, err)
-				return
-			}
-
-			if err := rl.Publish(cctx, *evt); err != nil {
-				// Check if this is an auth-required error and we have a relay key
-				if prefix, _ := parseErrorPrefix(err); prefix == "auth-required" && r.relaySecKey != "" {
-					logging.DebugMethod("relaystore", "SaveEvent", "auth-required from %s, attempting relay authentication", u)
-
-					// Try to authenticate with the upstream relay
-					// Derive our relay's public key for logging
-					relayPubKey, _ := nostr.GetPublicKey(r.relaySecKey)
-					logging.DebugMethod("relaystore", "SaveEvent", "authenticating with upstream relay using pubkey: %s", relayPubKey)
-					authErr := rl.Auth(cctx, func(event *nostr.Event) error {
-						return event.Sign(r.relaySecKey)
-					})
-
-					if authErr != nil {
-						logging.DebugMethod("relaystore", "SaveEvent", "authentication to %s failed: %v", u, authErr)
-						// Continue with normal error handling
-					} else {
-						logging.DebugMethod("relaystore", "SaveEvent", "authenticated to %s, retrying publish", u)
-
-						// Retry the publish after authentication
-						if retryErr := rl.Publish(cctx, *evt); retryErr != nil {
-							r.handleError(&errsMu, &errs, &prefixedErrs, u, retryErr, "retry publish")
-							return
-						}
-
-						// Success after authentication
-						atomic.AddInt64(&r.publishSuccesses, 1)
-						logging.DebugMethod("relaystore", "SaveEvent", "publish to %s succeeded after authentication for event %s", u, evt.ID)
-						return
-					}
-				}
-
-				r.handleError(&errsMu, &errs, &prefixedErrs, u, err, "publish")
-				return
-			}
-			// count success
-			atomic.AddInt64(&r.publishSuccesses, 1)
-			logging.DebugMethod("relaystore", "SaveEvent", "publish to %s succeeded for event %s", u, evt.ID)
-		}(url)
-	}
-
-	wg.Wait()
-
-	// Track consecutive failures for health checking
-	if len(errs) == 0 {
-		// Success: reset consecutive failure counter
-		atomic.StoreInt64(&r.consecutivePublishFailures, 0)
-		return nil
-	}
-
-	// Failure: increment consecutive failure counter
-	atomic.AddInt64(&r.consecutivePublishFailures, 1)
-
-	// if all remotes failed, return the first prefixed error if available, otherwise aggregated error
-	if len(prefixedErrs) > 0 {
-		return prefixedErrs[0]
-	}
-
-	// if no prefixed errors, return aggregated error
-	return errors.New(strings.Join(func() []string {
-		ss := make([]string, len(errs))
-		for i, e := range errs {
-			ss[i] = e.Error()
-		}
-		return ss
-	}(), "; "))
 }
 
 // ReplaceEvent is a no-op since RelayStore is query-only
