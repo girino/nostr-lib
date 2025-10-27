@@ -10,6 +10,7 @@ package broadcaststore
 import (
 	"context"
 	"sync/atomic"
+	"time"
 
 	"github.com/girino/nostr-lib/broadcast"
 	jsonlib "github.com/girino/nostr-lib/json"
@@ -27,6 +28,9 @@ type BroadcastStore struct {
 	failures               int64
 	consecutiveFailures    int64
 	maxConsecutiveFailures int64
+	// Timing statistics
+	totalExecutionDurationNs int64
+	executionCount           int64
 }
 
 // NewBroadcastStore creates a new BroadcastStore with the given configuration
@@ -63,6 +67,14 @@ func (bs *BroadcastStore) SaveEvent(ctx context.Context, evt *nostr.Event) error
 		logging.DebugMethod("broadcaststore", "SaveEvent", "Event %s is cached, skipping broadcast", evt.ID)
 		return nil
 	}
+
+	// Start timing measurement AFTER cache check
+	startTime := time.Now()
+	defer func() {
+		duration := time.Since(startTime)
+		atomic.AddInt64(&bs.totalExecutionDurationNs, duration.Nanoseconds())
+		atomic.AddInt64(&bs.executionCount, 1)
+	}()
 
 	// Increment attempts
 	atomic.AddInt64(&bs.attempts, 1)
@@ -137,6 +149,19 @@ func (bs *BroadcastStore) GetStats() jsonlib.JsonEntity {
 
 	obj.Set("health_state", jsonlib.NewJsonValue(healthState))
 	obj.Set("is_healthy", jsonlib.NewJsonValue(isHealthy))
+
+	// Add timing statistics
+	totalExecutionDurationNs := atomic.LoadInt64(&bs.totalExecutionDurationNs)
+	executionCount := atomic.LoadInt64(&bs.executionCount)
+
+	var averageExecutionMs float64
+	if executionCount > 0 {
+		averageExecutionMs = float64(totalExecutionDurationNs) / float64(executionCount) / 1e6
+	}
+
+	obj.Set("average_execution_ms", jsonlib.NewJsonValue(averageExecutionMs))
+	obj.Set("total_execution_ms", jsonlib.NewJsonValue(totalExecutionDurationNs/1e6))
+	obj.Set("execution_count", jsonlib.NewJsonValue(executionCount))
 
 	return obj
 }
