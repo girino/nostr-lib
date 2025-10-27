@@ -30,7 +30,6 @@ type MirrorManager struct {
 	mirrorCancel   context.CancelFunc
 	mirroredEvents int64
 	// mirroring health tracking
-	mirrorAttempts            int64
 	mirrorSuccesses           int64
 	mirrorFailures            int64
 	consecutiveMirrorFailures int64
@@ -42,7 +41,6 @@ type MirrorManager struct {
 // MirrorStats holds runtime counters for mirroring operations
 type MirrorStats struct {
 	MirroredEvents            int64  `json:"mirrored_events"`
-	MirrorAttempts            int64  `json:"mirror_attempts"`
 	MirrorSuccesses           int64  `json:"mirror_successes"`
 	MirrorFailures            int64  `json:"mirror_failures"`
 	ConsecutiveMirrorFailures int64  `json:"consecutive_mirror_failures"`
@@ -97,7 +95,6 @@ func (m *MirrorManager) GetStats() jsonlib.JsonEntity {
 	s := m.Stats()
 	obj := jsonlib.NewJsonObject()
 	obj.Set("mirrored_events", jsonlib.NewJsonValue(s.MirroredEvents))
-	obj.Set("mirror_attempts", jsonlib.NewJsonValue(s.MirrorAttempts))
 	obj.Set("mirror_successes", jsonlib.NewJsonValue(s.MirrorSuccesses))
 	obj.Set("mirror_failures", jsonlib.NewJsonValue(s.MirrorFailures))
 	obj.Set("consecutive_mirror_failures", jsonlib.NewJsonValue(s.ConsecutiveMirrorFailures))
@@ -114,7 +111,6 @@ func (m *MirrorManager) Stats() MirrorStats {
 
 	return MirrorStats{
 		MirroredEvents:            atomic.LoadInt64(&m.mirroredEvents),
-		MirrorAttempts:            atomic.LoadInt64(&m.mirrorAttempts),
 		MirrorSuccesses:           atomic.LoadInt64(&m.mirrorSuccesses),
 		MirrorFailures:            atomic.LoadInt64(&m.mirrorFailures),
 		ConsecutiveMirrorFailures: consecutiveMirrorFailures,
@@ -207,9 +203,6 @@ func (m *MirrorManager) mirrorFromRelays(ctx context.Context, relay *khatru.Rela
 				logging.DebugMethod("mirror", "mirrorFromRelays", "mirror subscription closed")
 				return
 			}
-
-			// Increment attempt counter for every event received
-			atomic.AddInt64(&m.mirrorAttempts, 1)
 
 			if relayEvent.Event != nil {
 				// broadcast the event to all connected clients
