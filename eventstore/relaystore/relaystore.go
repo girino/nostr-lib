@@ -162,7 +162,7 @@ func (r *RelayStore) GetStats() jsonlib.JsonEntity {
 }
 
 // New creates a RelayStore with mandatory query relays for querying only.
-func New(queryUrls []string, publishUrls []string, relaySecKey string) *RelayStore {
+func New(queryUrls []string) *RelayStore {
 	if len(queryUrls) == 0 {
 		panic("query relays are mandatory - at least one query relay must be provided")
 	}
