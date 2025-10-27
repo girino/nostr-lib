@@ -101,17 +101,6 @@ func getHealthState(consecutiveFailures int64) string {
 	return HealthRed
 }
 
-// getWorstHealthState returns the worst health state between three states
-func getWorstHealthState(state1, state2, state3 string) string {
-	if state1 == HealthRed || state2 == HealthRed || state3 == HealthRed {
-		return HealthRed
-	}
-	if state1 == HealthYellow || state2 == HealthYellow || state3 == HealthYellow {
-		return HealthYellow
-	}
-	return HealthGreen
-}
-
 // GetStatsName returns the name of this stats provider
 func (r *RelayStore) GetStatsName() string {
 	return "relay"
