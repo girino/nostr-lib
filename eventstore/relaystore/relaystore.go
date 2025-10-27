@@ -541,11 +541,20 @@ func (r *RelayStore) QueryEvents(ctx context.Context, filter nostr.Filter) (chan
 
 // DeleteEvent is a no-op for relay forwarding store.
 func (r *RelayStore) DeleteEvent(ctx context.Context, evt *nostr.Event) error {
+	// RelayStore is query-only, no-op for DeleteEvent
 	return nil
 }
 
-// SaveEvent forwards the event to all configured remotes. It returns nil if at least one remote accepted the event.
+// SaveEvent is a no-op since RelayStore is query-only
 func (r *RelayStore) SaveEvent(ctx context.Context, evt *nostr.Event) error {
+	// RelayStore is query-only, no-op for SaveEvent
+	logging.DebugMethod("relaystore", "SaveEvent", "RelayStore is query-only, ignoring save for event %s", evt.ID)
+	return nil
+}
+
+// saveEventToRemotes forwards the event to all configured remotes. It returns nil if at least one remote accepted the event.
+// This is the original implementation kept for reference but no longer used.
+func (r *RelayStore) saveEventToRemotes(ctx context.Context, evt *nostr.Event) error {
 	// Start timing measurement
 	startTime := time.Now()
 	defer func() {
@@ -660,9 +669,11 @@ func (r *RelayStore) SaveEvent(ctx context.Context, evt *nostr.Event) error {
 	}(), "; "))
 }
 
-// ReplaceEvent just forwards the event (best-effort), similar to SaveEvent.
+// ReplaceEvent is a no-op since RelayStore is query-only
 func (r *RelayStore) ReplaceEvent(ctx context.Context, evt *nostr.Event) error {
-	return r.SaveEvent(ctx, evt)
+	// RelayStore is query-only, no-op for ReplaceEvent
+	logging.DebugMethod("relaystore", "ReplaceEvent", "RelayStore is query-only, ignoring replace for event %s", evt.ID)
+	return nil
 }
 
 // CountEvents forwards the filter to query remotes and returns the total number
