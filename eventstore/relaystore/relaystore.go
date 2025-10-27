@@ -10,7 +10,6 @@ package relaystore
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	neturl "net/url"
 	"strings"
@@ -35,83 +34,13 @@ const (
 // Query timeout duration for both QueryEvents and CountEvents
 const QueryTimeoutDuration = 5 * time.Second
 
-// PrefixedError represents an error with a machine-readable prefix from NIP-01
-type PrefixedError struct {
-	Prefix   string
-	Message  string
-	RelayURL string
-}
-
-func (e PrefixedError) Error() string {
-	if e.Prefix != "" {
-		if e.RelayURL != "" {
-			return e.Prefix + ": " + e.Message + " (" + e.RelayURL + ")"
-		}
-		return e.Prefix + ": " + e.Message
-	}
-	return e.Message
-}
-
-// parseErrorPrefix extracts the machine-readable prefix from a relay error message
-// NIP-01 standardized prefixes: duplicate, pow, blocked, rate-limited, invalid, restricted, mute, error, auth-required
-func parseErrorPrefix(err error) (prefix, message string) {
-	if err == nil {
-		return "", ""
-	}
-
-	errStr := err.Error()
-
-	// Remove "msg: " prefix that Publish() always adds
-	errStr = strings.TrimPrefix(errStr, "msg: ")
-
-	// Look for pattern "prefix: message" where prefix is before the first colon
-	if colonIdx := strings.Index(errStr, ": "); colonIdx > 0 {
-		prefix = strings.TrimSpace(errStr[:colonIdx])
-		message = strings.TrimSpace(errStr[colonIdx+2:])
-
-		// Validate that the prefix is one of the standardized NIP-01 prefixes
-		validPrefixes := []string{"duplicate", "pow", "blocked", "rate-limited", "invalid", "restricted", "mute", "error", "auth-required"}
-		for _, validPrefix := range validPrefixes {
-			if prefix == validPrefix {
-				return prefix, message
-			}
-		}
-	}
-
-	// If no valid prefix found, return the whole error as message
-	return "", errStr
-}
-
-// handleError handles error collection, logging, and counting
-func (r *RelayStore) handleError(errsMu *sync.Mutex, errs *[]error, prefixedErrs *[]PrefixedError, url string, err error, context string) {
-	errsMu.Lock()
-	*errs = append(*errs, fmt.Errorf("%s: %w", url, err))
-	// parse error prefix for structured error handling
-	if prefix, msg := parseErrorPrefix(err); prefix != "" {
-		*prefixedErrs = append(*prefixedErrs, PrefixedError{Prefix: prefix, Message: msg, RelayURL: url})
-	}
-	errsMu.Unlock()
-	// count failure
-	atomic.AddInt64(&r.publishFailures, 1)
-	logging.DebugMethod("relaystore", "logError", "%s to %s failed: %v", context, url, err)
-}
-
 type RelayStore struct {
-	urls   []string
-	relays map[string]*nostr.Relay
 	// queryUrls are the remotes used for answering queries/subscriptions
 	queryUrls []string
 	// pool manages connections for query remotes
 	pool *nostr.SimplePool
 	mu   sync.RWMutex
-	// publish timeout per remote
-	publishTimeout time.Duration
-	// relaySecKey is the private key used for authenticating to upstream relays
-	relaySecKey string
 	// stats
-	publishAttempts     int64
-	publishSuccesses    int64
-	publishFailures     int64
 	queryRequests       int64
 	queryInternal       int64
 	queryExternal       int64
@@ -126,23 +55,17 @@ type RelayStore struct {
 	// subset of queryUrls that advertise NIP-45 in their NIP-11
 	countableQueryUrls []string
 	// health check tracking
-	consecutivePublishFailures int64
-	consecutiveQueryFailures   int64
-	maxConsecutiveFailures     int64
+	consecutiveQueryFailures int64
+	maxConsecutiveFailures   int64
 	// timing statistics
-	totalPublishDurationNs int64
-	totalQueryDurationNs   int64
-	totalCountDurationNs   int64
-	publishCount           int64
-	queryCount             int64
-	countCount             int64
+	totalQueryDurationNs int64
+	totalCountDurationNs int64
+	queryCount           int64
+	countCount           int64
 }
 
-// Stats holds runtime counters exported by RelayStore
+// Stats holds runtime counters exported by RelayStore (DEPRECATED: not used anymore)
 type Stats struct {
-	PublishAttempts     int64 `json:"publish_attempts"`
-	PublishSuccesses    int64 `json:"publish_successes"`
-	PublishFailures     int64 `json:"publish_failures"`
 	QueryRequests       int64 `json:"query_requests"`
 	QueryInternal       int64 `json:"query_internal_requests"`
 	QueryExternal       int64 `json:"query_external_requests"`
@@ -155,21 +78,17 @@ type Stats struct {
 	CountEventsReturned int64 `json:"count_events_returned"`
 	CountFailures       int64 `json:"count_failures"`
 	// Health check fields
-	ConsecutivePublishFailures int64  `json:"consecutive_publish_failures"`
-	ConsecutiveQueryFailures   int64  `json:"consecutive_query_failures"`
-	IsHealthy                  bool   `json:"is_healthy"`
-	HealthStatus               string `json:"health_status"`
+	ConsecutiveQueryFailures int64  `json:"consecutive_query_failures"`
+	IsHealthy                bool   `json:"is_healthy"`
+	HealthStatus             string `json:"health_status"`
 	// Detailed health indicators
-	PublishHealthState string `json:"publish_health_state"`
-	QueryHealthState   string `json:"query_health_state"`
-	MainHealthState    string `json:"main_health_state"`
+	QueryHealthState string `json:"query_health_state"`
+	MainHealthState  string `json:"main_health_state"`
 	// Timing statistics
-	AveragePublishDurationMs float64 `json:"average_publish_duration_ms"`
-	AverageQueryDurationMs   float64 `json:"average_query_duration_ms"`
-	AverageCountDurationMs   float64 `json:"average_count_duration_ms"`
-	TotalPublishDurationMs   int64   `json:"total_publish_duration_ms"`
-	TotalQueryDurationMs     int64   `json:"total_query_duration_ms"`
-	TotalCountDurationMs     int64   `json:"total_count_duration_ms"`
+	AverageQueryDurationMs float64 `json:"average_query_duration_ms"`
+	AverageCountDurationMs float64 `json:"average_count_duration_ms"`
+	TotalQueryDurationMs   int64   `json:"total_query_duration_ms"`
+	TotalCountDurationMs   int64   `json:"total_count_duration_ms"`
 }
 
 // getHealthState determines the health state based on consecutive failures
@@ -201,35 +120,27 @@ func (r *RelayStore) GetStatsName() string {
 // GetStats returns stats as JsonEntity
 func (r *RelayStore) GetStats() jsonlib.JsonEntity {
 	// Load all counters
-	consecutivePublishFailures := atomic.LoadInt64(&r.consecutivePublishFailures)
 	consecutiveQueryFailures := atomic.LoadInt64(&r.consecutiveQueryFailures)
 	maxFailures := atomic.LoadInt64(&r.maxConsecutiveFailures)
-	totalPublishDurationNs := atomic.LoadInt64(&r.totalPublishDurationNs)
 	totalQueryDurationNs := atomic.LoadInt64(&r.totalQueryDurationNs)
 	totalCountDurationNs := atomic.LoadInt64(&r.totalCountDurationNs)
-	publishCount := atomic.LoadInt64(&r.publishCount)
 	queryCount := atomic.LoadInt64(&r.queryCount)
 	countCount := atomic.LoadInt64(&r.countCount)
 
 	// Calculate health states
-	isHealthy := consecutivePublishFailures < maxFailures && consecutiveQueryFailures < maxFailures
+	isHealthy := consecutiveQueryFailures < maxFailures
 	healthStatus := "healthy"
 	if !isHealthy {
 		healthStatus = "unhealthy"
 	}
 
-	publishHealthState := getHealthState(consecutivePublishFailures)
 	queryHealthState := getHealthState(consecutiveQueryFailures)
-	mainHealthState := getWorstHealthState(publishHealthState, queryHealthState, HealthGreen)
+	mainHealthState := queryHealthState
 
 	// Calculate timing statistics
-	var averagePublishDurationMs float64
 	var averageQueryDurationMs float64
 	var averageCountDurationMs float64
 
-	if publishCount > 0 {
-		averagePublishDurationMs = float64(totalPublishDurationNs) / float64(publishCount) / 1e6
-	}
 	if queryCount > 0 {
 		averageQueryDurationMs = float64(totalQueryDurationNs) / float64(queryCount) / 1e6
 	}
@@ -239,11 +150,6 @@ func (r *RelayStore) GetStats() jsonlib.JsonEntity {
 
 	// Build JsonObject directly
 	obj := jsonlib.NewJsonObject()
-	obj.Set("publish_attempts", jsonlib.NewJsonValue(atomic.LoadInt64(&r.publishAttempts)))
-	obj.Set("publish_successes", jsonlib.NewJsonValue(atomic.LoadInt64(&r.publishSuccesses)))
-	obj.Set("publish_failures", jsonlib.NewJsonValue(atomic.LoadInt64(&r.publishFailures)))
-	obj.Set("consecutive_publish_failures", jsonlib.NewJsonValue(consecutivePublishFailures))
-	obj.Set("publish_health_state", jsonlib.NewJsonValue(publishHealthState))
 	obj.Set("query_requests", jsonlib.NewJsonValue(atomic.LoadInt64(&r.queryRequests)))
 	obj.Set("query_internal_requests", jsonlib.NewJsonValue(atomic.LoadInt64(&r.queryInternal)))
 	obj.Set("query_external_requests", jsonlib.NewJsonValue(atomic.LoadInt64(&r.queryExternal)))
@@ -259,28 +165,22 @@ func (r *RelayStore) GetStats() jsonlib.JsonEntity {
 	obj.Set("main_health_state", jsonlib.NewJsonValue(mainHealthState))
 	obj.Set("health_status", jsonlib.NewJsonValue(healthStatus))
 	obj.Set("is_healthy", jsonlib.NewJsonValue(isHealthy))
-	obj.Set("average_publish_duration_ms", jsonlib.NewJsonValue(averagePublishDurationMs))
 	obj.Set("average_query_duration_ms", jsonlib.NewJsonValue(averageQueryDurationMs))
 	obj.Set("average_count_duration_ms", jsonlib.NewJsonValue(averageCountDurationMs))
-	obj.Set("total_publish_duration_ms", jsonlib.NewJsonValue(totalPublishDurationNs/1e6))
 	obj.Set("total_query_duration_ms", jsonlib.NewJsonValue(totalQueryDurationNs/1e6))
 	obj.Set("total_count_duration_ms", jsonlib.NewJsonValue(totalCountDurationNs/1e6))
 	return obj
 }
 
-// New creates a RelayStore with mandatory query relays, optional publish relays, and optional relay authentication key.
+// New creates a RelayStore with mandatory query relays for querying only.
 func New(queryUrls []string, publishUrls []string, relaySecKey string) *RelayStore {
 	if len(queryUrls) == 0 {
 		panic("query relays are mandatory - at least one query relay must be provided")
 	}
 
 	rs := &RelayStore{
-		urls:                   publishUrls,
 		queryUrls:              queryUrls,
-		relays:                 make(map[string]*nostr.Relay),
-		publishTimeout:         7 * time.Second,
 		maxConsecutiveFailures: 10, // Default threshold: 10 consecutive failures
-		relaySecKey:            relaySecKey,
 	}
 	return rs
 }
@@ -380,55 +280,7 @@ func (r *RelayStore) Init() error {
 func (r *RelayStore) Close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for _, rl := range r.relays {
-		_ = rl.Close()
-	}
-	r.relays = map[string]*nostr.Relay{}
-}
-
-// helper to ensure a relay connection exists; best-effort.
-func (r *RelayStore) ensureRelay(ctx context.Context, url string) (*nostr.Relay, error) {
-	r.mu.RLock()
-	rl, ok := r.relays[url]
-	r.mu.RUnlock()
-	if ok && rl.IsConnected() {
-		return rl, nil
-	}
-	// try to connect synchronously
-	logging.DebugMethod("relaystore", "ensureRelay", "connecting to %s", url)
-	newrl, err := nostr.RelayConnect(ctx, url)
-	if err != nil {
-		logging.DebugMethod("relaystore", "ensureRelay", "failed to connect to %s: %v", url, err)
-		return nil, err
-	}
-
-	// attempt authentication if we have a relay secret key
-	if r.relaySecKey != "" {
-		logging.DebugMethod("relaystore", "ensureRelay", "attempting authentication to %s with key length: %d", url, len(r.relaySecKey))
-		if len(r.relaySecKey) > 0 {
-			prefixLen := 8
-			if len(r.relaySecKey) < prefixLen {
-				prefixLen = len(r.relaySecKey)
-			}
-			logging.DebugMethod("relaystore", "ensureRelay", "relaySecKey starts with: %s", r.relaySecKey[:prefixLen])
-		}
-		err = newrl.Auth(ctx, func(event *nostr.Event) error {
-			// sign the AUTH event with our relay secret key
-			return event.Sign(r.relaySecKey)
-		})
-		if err != nil {
-			logging.DebugMethod("relaystore", "ensureRelay", "authentication to %s failed: %v", url, err)
-			// continue without authentication - some relays don't require it
-		} else {
-			logging.DebugMethod("relaystore", "ensureRelay", "authenticated to %s", url)
-		}
-	}
-
-	r.mu.Lock()
-	r.relays[url] = newrl
-	r.mu.Unlock()
-	logging.DebugMethod("relaystore", "ensureRelay", "connected to %s", url)
-	return newrl, nil
+	// Nothing to close, connections are managed by the pool
 }
 
 // QueryEvents returns an empty, closed channel because this store does not persist events.
