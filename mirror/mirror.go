@@ -36,6 +36,9 @@ type MirrorManager struct {
 	// relay health tracking
 	liveRelays int64
 	deadRelays int64
+	// events dropped because BroadcastEvent was slower than ingest
+	droppedEvents int64
+	lastDropLog   int64 // unix seconds
 }
 
 // MirrorStats holds runtime counters for mirroring operations
@@ -46,8 +49,9 @@ type MirrorStats struct {
 	ConsecutiveMirrorFailures int64  `json:"consecutive_mirror_failures"`
 	MirrorHealthState         string `json:"mirror_health_state"`
 	// Relay health statistics
-	LiveRelays int64 `json:"live_relays"`
-	DeadRelays int64 `json:"dead_relays"`
+	LiveRelays    int64 `json:"live_relays"`
+	DeadRelays    int64 `json:"dead_relays"`
+	DroppedEvents int64 `json:"dropped_events"`
 }
 
 // Health state constants
@@ -101,6 +105,7 @@ func (m *MirrorManager) GetStats() jsonlib.JsonEntity {
 	obj.Set("mirror_health_state", jsonlib.NewJsonValue(s.MirrorHealthState))
 	obj.Set("live_relays", jsonlib.NewJsonValue(s.LiveRelays))
 	obj.Set("dead_relays", jsonlib.NewJsonValue(s.DeadRelays))
+	obj.Set("dropped_events", jsonlib.NewJsonValue(s.DroppedEvents))
 	return obj
 }
 
@@ -117,6 +122,7 @@ func (m *MirrorManager) Stats() MirrorStats {
 		MirrorHealthState:         mirrorHealthState,
 		LiveRelays:                atomic.LoadInt64(&m.liveRelays),
 		DeadRelays:                atomic.LoadInt64(&m.deadRelays),
+		DroppedEvents:             atomic.LoadInt64(&m.droppedEvents),
 	}
 }
 
@@ -179,19 +185,46 @@ func (m *MirrorManager) StopMirroring() {
 	}
 }
 
+// ingestQueueSize bounds events waiting for BroadcastEvent. go-nostr
+// dispatchEvent spawns a goroutine per EVENT on an unbuffered channel; if
+// BroadcastEvent blocks (slow websocket), those goroutines grow without bound.
+const ingestQueueSize = 4096
+
+const dropLogInterval = 10 * time.Second
+
+func enqueueMirrorEvent(ch chan *nostr.Event, evt *nostr.Event) bool {
+	select {
+	case ch <- evt:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *MirrorManager) noteDrop() {
+	n := atomic.AddInt64(&m.droppedEvents, 1)
+	now := time.Now().Unix()
+	last := atomic.LoadInt64(&m.lastDropLog)
+	if last != 0 && now-last < int64(dropLogInterval.Seconds()) {
+		return
+	}
+	if atomic.CompareAndSwapInt64(&m.lastDropLog, last, now) {
+		logging.Warn("mirror ingest queue full; dropped %d events total (BroadcastEvent backpressure)", n)
+	}
+}
+
 // mirrorFromRelays continuously mirrors events from all query relays
 func (m *MirrorManager) mirrorFromRelays(ctx context.Context, relay *khatru.Relay) {
 	logging.DebugMethod("mirror", "mirrorFromRelays", "starting mirror from %d query relays: %v", len(m.queryUrls), m.queryUrls)
 
-	// create a filter that gets all events since now
 	now := nostr.Now()
 	filter := nostr.Filter{Since: &now}
-
-	// subscribe to all query relays at once (handles deduplication)
 	sub := m.pool.SubscribeMany(ctx, m.queryUrls, filter)
 
-	// Start relay health monitoring goroutine
 	go m.monitorRelayHealth(ctx)
+
+	queue := make(chan *nostr.Event, ingestQueueSize)
+	go m.broadcastLoop(ctx, relay, queue)
 
 	for {
 		select {
@@ -203,14 +236,26 @@ func (m *MirrorManager) mirrorFromRelays(ctx context.Context, relay *khatru.Rela
 				logging.DebugMethod("mirror", "mirrorFromRelays", "mirror subscription closed")
 				return
 			}
-
-			if relayEvent.Event != nil {
-				// broadcast the event to all connected clients
-				clientCount := relay.BroadcastEvent(relayEvent.Event)
-				atomic.AddInt64(&m.mirroredEvents, 1)
-				atomic.AddInt64(&m.mirrorSuccesses, 1)
-				logging.DebugMethod("mirror", "mirrorFromRelays", "mirrored event %s from %s to %d clients", relayEvent.Event.ID, relayEvent.Relay, clientCount)
+			if relayEvent.Event == nil {
+				continue
 			}
+			if !enqueueMirrorEvent(queue, relayEvent.Event) {
+				m.noteDrop()
+			}
+		}
+	}
+}
+
+func (m *MirrorManager) broadcastLoop(ctx context.Context, relay *khatru.Relay, queue chan *nostr.Event) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case evt := <-queue:
+			clientCount := relay.BroadcastEvent(evt)
+			atomic.AddInt64(&m.mirroredEvents, 1)
+			atomic.AddInt64(&m.mirrorSuccesses, 1)
+			logging.DebugMethod("mirror", "broadcastLoop", "mirrored event %s to %d clients", evt.ID, clientCount)
 		}
 	}
 }
