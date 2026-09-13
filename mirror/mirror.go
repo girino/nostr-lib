@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/fiatjaf/khatru"
+	"github.com/girino/nostr-lib/fanout"
 	jsonlib "github.com/girino/nostr-lib/json"
 	"github.com/girino/nostr-lib/logging"
 	"github.com/nbd-wtf/go-nostr"
@@ -39,6 +40,8 @@ type MirrorManager struct {
 	// events dropped because BroadcastEvent was slower than ingest
 	droppedEvents int64
 	lastDropLog   int64 // unix seconds
+	broadcast     func(*nostr.Event) int
+	listeners     func() int64
 }
 
 // MirrorStats holds runtime counters for mirroring operations
@@ -136,20 +139,29 @@ func (m *MirrorManager) getHealthState(consecutiveFailures int64) string {
 	return HealthRed
 }
 
-// StartMirroring begins continuous mirroring of events from query relays to the khatru relay
+// StartMirroring begins continuous mirroring using khatru.BroadcastEvent.
 func (m *MirrorManager) StartMirroring(relay *khatru.Relay) error {
+	return m.startMirroring(relay.BroadcastEvent, nil)
+}
+
+// StartMirroringHub is the same as StartMirroring but delivers via hub
+// (per-client queues) and only pulls the firehose while hub.ListenerCount() > 0.
+func (m *MirrorManager) StartMirroringHub(relay *khatru.Relay, hub *fanout.Hub) error {
+	if hub == nil {
+		return m.StartMirroring(relay)
+	}
+	return m.startMirroring(hub.BroadcastEvent, hub.ListenerCount)
+}
+
+func (m *MirrorManager) startMirroring(broadcast func(*nostr.Event) int, listeners func() int64) error {
 	if m.mirrorCtx != nil {
-		// already started
 		return nil
 	}
-
 	if len(m.queryUrls) == 0 {
-		// No query relays configured - this is OK, relay can work without mirroring
 		logging.DebugMethod("mirror", "StartMirroring", "no query relays configured, skipping mirroring")
 		return nil
 	}
 
-	// Check connectivity to all query relays first
 	liveCount := 0
 	for _, url := range m.queryUrls {
 		_, err := m.pool.EnsureRelay(url)
@@ -159,19 +171,16 @@ func (m *MirrorManager) StartMirroring(relay *khatru.Relay) error {
 			liveCount++
 		}
 	}
-
 	if liveCount == 0 {
-		// Query relays are configured but none are available - this is a fatal error
 		return fmt.Errorf("no query relays are available (configured: %d)", len(m.queryUrls))
 	}
 
 	logging.DebugMethod("mirror", "StartMirroring", "starting event mirroring from %d query relays (%d/%d available)", len(m.queryUrls), liveCount, len(m.queryUrls))
 
+	m.broadcast = broadcast
+	m.listeners = listeners
 	m.mirrorCtx, m.mirrorCancel = context.WithCancel(context.Background())
-
-	// start single mirroring goroutine for all query relays
-	go m.mirrorFromRelays(m.mirrorCtx, relay)
-
+	go m.mirrorFromRelays(m.mirrorCtx)
 	return nil
 }
 
@@ -213,30 +222,68 @@ func (m *MirrorManager) noteDrop() {
 	}
 }
 
-// mirrorFromRelays continuously mirrors events from all query relays
-func (m *MirrorManager) mirrorFromRelays(ctx context.Context, relay *khatru.Relay) {
-	logging.DebugMethod("mirror", "mirrorFromRelays", "starting mirror from %d query relays: %v", len(m.queryUrls), m.queryUrls)
+const idlePollInterval = 250 * time.Millisecond
 
-	now := nostr.Now()
-	filter := nostr.Filter{Since: &now}
-	sub := m.pool.SubscribeMany(ctx, m.queryUrls, filter)
+// mirrorFromRelays continuously mirrors events from all query relays
+func (m *MirrorManager) mirrorFromRelays(ctx context.Context) {
+	logging.DebugMethod("mirror", "mirrorFromRelays", "starting mirror from %d query relays: %v", len(m.queryUrls), m.queryUrls)
 
 	go m.monitorRelayHealth(ctx)
 
 	queue := make(chan *nostr.Event, ingestQueueSize)
-	go m.broadcastLoop(ctx, relay, queue)
+	go m.broadcastLoop(ctx, queue)
 
+	if m.listeners == nil {
+		m.ingestSubscription(ctx, queue)
+		return
+	}
+
+	for ctx.Err() == nil {
+		if m.listeners() == 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(idlePollInterval):
+				continue
+			}
+		}
+		subCtx, cancel := context.WithCancel(ctx)
+		go func() {
+			t := time.NewTicker(idlePollInterval)
+			defer t.Stop()
+			for {
+				select {
+				case <-subCtx.Done():
+					return
+				case <-t.C:
+					if m.listeners() == 0 {
+						cancel()
+						return
+					}
+				}
+			}
+		}()
+		m.ingestSubscription(subCtx, queue)
+		cancel()
+	}
+}
+
+func (m *MirrorManager) ingestSubscription(ctx context.Context, queue chan *nostr.Event) {
+	now := nostr.Now()
+	filter := nostr.Filter{Since: &now}
+	sub := m.pool.SubscribeMany(ctx, m.queryUrls, filter)
 	for {
 		select {
 		case <-ctx.Done():
-			logging.DebugMethod("mirror", "mirrorFromRelays", "mirror from query relays stopped (context cancelled)")
 			return
 		case relayEvent, ok := <-sub:
 			if !ok {
-				logging.DebugMethod("mirror", "mirrorFromRelays", "mirror subscription closed")
 				return
 			}
 			if relayEvent.Event == nil {
+				continue
+			}
+			if m.listeners != nil && m.listeners() == 0 {
 				continue
 			}
 			if !enqueueMirrorEvent(queue, relayEvent.Event) {
@@ -246,16 +293,22 @@ func (m *MirrorManager) mirrorFromRelays(ctx context.Context, relay *khatru.Rela
 	}
 }
 
-func (m *MirrorManager) broadcastLoop(ctx context.Context, relay *khatru.Relay, queue chan *nostr.Event) {
+func (m *MirrorManager) broadcastLoop(ctx context.Context, queue chan *nostr.Event) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case evt := <-queue:
-			clientCount := relay.BroadcastEvent(evt)
+			if m.listeners != nil && m.listeners() == 0 {
+				continue
+			}
+			n := 0
+			if m.broadcast != nil {
+				n = m.broadcast(evt)
+			}
 			atomic.AddInt64(&m.mirroredEvents, 1)
 			atomic.AddInt64(&m.mirrorSuccesses, 1)
-			logging.DebugMethod("mirror", "broadcastLoop", "mirrored event %s to %d clients", evt.ID, clientCount)
+			logging.DebugMethod("mirror", "broadcastLoop", "mirrored event %s to %d clients", evt.ID, n)
 		}
 	}
 }
