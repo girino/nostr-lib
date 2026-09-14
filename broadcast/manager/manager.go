@@ -147,7 +147,11 @@ func (m *Manager) MarkInitialized() {
 func (m *Manager) GetTopRelays() []*RelayInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	return m.topRelaysLocked()
+}
 
+// topRelaysLocked ranks relays. Caller must hold m.mu (RLock or Lock).
+func (m *Manager) topRelaysLocked() []*RelayInfo {
 	relays := make([]*RelayInfo, 0, len(m.relays))
 	untested := 0
 	for _, relay := range m.relays {
@@ -263,7 +267,11 @@ func (m *Manager) GetRelayInfo(url string) interface{} {
 func (m *Manager) GetMandatoryRelays() []*RelayInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	return m.mandatoryRelaysLocked()
+}
 
+// mandatoryRelaysLocked lists mandatory relays. Caller must hold m.mu.
+func (m *Manager) mandatoryRelaysLocked() []*RelayInfo {
 	relays := make([]*RelayInfo, 0)
 	for _, relay := range m.relays {
 		if relay.IsMandatory {
@@ -342,8 +350,10 @@ func (m *Manager) GetStats() json.JsonEntity {
 	obj.Set("decay", json.NewJsonValue(m.decay))
 	obj.Set("initialized", json.NewJsonValue(m.initialized))
 
-	topRelays := m.GetTopRelays()
-	mandatoryRelays := m.GetMandatoryRelays()
+	// Use the locked helpers. GetTopRelays/GetMandatoryRelays take RLock
+	// themselves; nested RLock deadlocks if a writer (UpdateHealth) is waiting.
+	topRelays := m.topRelaysLocked()
+	mandatoryRelays := m.mandatoryRelaysLocked()
 
 	// Convert top relays to JsonList
 	topRelayList := json.NewJsonList()
